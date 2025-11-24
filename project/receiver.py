@@ -21,7 +21,7 @@ frame_lock = threading.Lock()
 
 
 def recvall(sock, n):
-    """Receive exactly n bytes or return None if the connection closes."""
+    """Receive exactly n bytes or return None if it fails."""
     data = bytearray()
     while len(data) < n:
         try:
@@ -35,7 +35,7 @@ def recvall(sock, n):
 
 
 def video_receiver(sock):
-    """Background thread: receive frames over TCP and update current_frame."""
+    """Thread that receives frames and stores the latest one."""
     global current_frame, running
 
     try:
@@ -72,28 +72,27 @@ def video_receiver(sock):
 def main():
     global running
 
-    # --- connect to video stream ---
+    # connect to video stream
     vid_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     print(f"[receiver] Connecting to {SENDER_IP}:{PORT} for video...")
     vid_sock.connect((SENDER_IP, PORT))
     print("[receiver] Connected for video")
 
-    # --- connect to control channel ---
+    # connect to control channel
     ctrl_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     print(f"[receiver] Connecting to {SENDER_IP}:{CONTROL_PORT} for control...")
     ctrl_sock.connect((SENDER_IP, CONTROL_PORT))
     print("[receiver] Connected for control")
 
     def send_move(dx, dy):
-        """Send a movement packet. Small and non-blocking-ish."""
+        """Send one small movement packet to the sender."""
         try:
             packet = struct.pack("!ii", dx, dy)
-            # send() is fine for this tiny 8-byte packet
             ctrl_sock.send(packet)
         except OSError:
             pass
 
-    # Start background video thread
+    # start background video thread
     t = threading.Thread(target=video_receiver, args=(vid_sock,), daemon=True)
     t.start()
 
@@ -103,14 +102,14 @@ def main():
 
     try:
         while running:
-            # Get latest frame (if any)
+            # get the latest frame
             with frame_lock:
                 frame = None if current_frame is None else current_frame.copy()
 
             if frame is not None:
                 fh, fw = frame.shape[:2]
 
-                # Fit inside current window size
+                # scale frame to fit the current window
                 try:
                     x, y, win_w, win_h = cv2.getWindowImageRect(window_name)
                 except AttributeError:
@@ -131,7 +130,7 @@ def main():
                 else:
                     cv2.imshow(window_name, frame)
 
-            # Keyboard handling is now independent of video receiving
+            # keyboard input
             key = cv2.waitKey(1) & 0xFF
 
             if key == 27 or key == ord('q'):  # ESC or q
