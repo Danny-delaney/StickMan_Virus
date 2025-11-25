@@ -5,7 +5,7 @@ import threading
 import cv2
 import numpy as np
 
-SENDER_IP = "127.0.0.1"
+SENDER_IP = "149.153.106.23"
 PORT = 5000          # video stream port
 CONTROL_PORT = 5001  # control port
 
@@ -14,14 +14,9 @@ MOVE_STEP = 20       # pixels per key press
 INITIAL_WIDTH = 960
 INITIAL_HEIGHT = 540
 
-# Shared frame between network thread and UI thread
-current_frame = None
-running = True
-frame_lock = threading.Lock()
 
-
-def recvall(sock, n):
-    """Receive exactly n bytes or return None if it fails."""
+def recvall(sock, n: int):
+    """Receive exactly n bytes or return None."""
     data = bytearray()
     while len(data) < n:
         try:
@@ -34,45 +29,36 @@ def recvall(sock, n):
     return bytes(data)
 
 
-def video_receiver(sock):
-    """Thread that receives frames and stores the latest one."""
-    global current_frame, running
+def video_receiver(sock, frame_lock, frame_holder, running_flag):
+    """
+    Receive JPEG frames from the sender.
+    Protocol:
+      - read 4 bytes: frame length, big endian
+      - read frame bytes
+    """
+    while running_flag["running"]:
+        header = recvall(sock, 4)
+        if not header:
+            break
 
-    try:
-        while running:
-            header = recvall(sock, 4)
-            if header is None:
-                print("[receiver] Video connection closed by sender")
-                break
+        (size,) = struct.unpack("!I", header)
+        payload = recvall(sock, size)
+        if not payload:
+            break
 
-            (frame_len,) = struct.unpack("!I", header)
+        frame = cv2.imdecode(np.frombuffer(payload, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if frame is None:
+            continue
 
-            jpeg_data = recvall(sock, frame_len)
-            if jpeg_data is None:
-                print("[receiver] Video connection closed during frame")
-                break
-
-            arr = np.frombuffer(jpeg_data, dtype=np.uint8)
-            frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-            if frame is None:
-                continue
-
-            with frame_lock:
-                current_frame = frame
-
-    finally:
-        running = False
-        try:
-            sock.close()
-        except OSError:
-            pass
-        print("[receiver] Video thread exiting")
+        with frame_lock:
+            frame_holder["frame"] = frame
 
 
 def main():
-    global running
+    running_flag = {"running": True}
+    frame_lock = threading.Lock()
+    frame_holder = {"frame": None}
 
-    # connect to video stream
     vid_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     print(f"[receiver] Connecting to {SENDER_IP}:{PORT} for video...")
     vid_sock.connect((SENDER_IP, PORT))
@@ -84,27 +70,33 @@ def main():
     ctrl_sock.connect((SENDER_IP, CONTROL_PORT))
     print("[receiver] Connected for control")
 
-    def send_move(dx, dy):
-        """Send one small movement packet to the sender."""
+    def send_move(dx, dy, action=0):
+        """Send one control packet to the sender."""
         try:
-            packet = struct.pack("!ii", dx, dy)
-            ctrl_sock.send(packet)
+            # dx, dy, action (0=move/jump, 1=punch/click)
+            packet = struct.pack("!iii", int(dx), int(dy), int(action))
+            ctrl_sock.sendall(packet)
         except OSError:
             pass
 
     # start background video thread
-    t = threading.Thread(target=video_receiver, args=(vid_sock,), daemon=True)
+    t = threading.Thread(
+        target=video_receiver,
+        args=(vid_sock, frame_lock, frame_holder, running_flag),
+        daemon=True,
+    )
     t.start()
 
-    window_name = "Remote Desktop"
+    window_name = "ReceiverVideo"
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(window_name, INITIAL_WIDTH, INITIAL_HEIGHT)
 
+    print("[receiver] Controls: WASD to move, SPACE to punch/click, Q/ESC to quit")
+
     try:
-        while running:
-            # get the latest frame
+        while running_flag["running"]:
             with frame_lock:
-                frame = None if current_frame is None else current_frame.copy()
+                frame = None if frame_holder["frame"] is None else frame_holder["frame"].copy()
 
             if frame is not None:
                 fh, fw = frame.shape[:2]
@@ -117,15 +109,14 @@ def main():
 
                 if win_w > 0 and win_h > 0:
                     scale = min(win_w / fw, win_h / fh)
-                    new_w = max(1, int(fw * scale))
-                    new_h = max(1, int(fh * scale))
-
+                    new_w = int(fw * scale)
+                    new_h = int(fh * scale)
                     resized = cv2.resize(frame, (new_w, new_h))
+
                     canvas = np.zeros((win_h, win_w, 3), dtype=np.uint8)
-                    x_offset = (win_w - new_w) // 2
                     y_offset = (win_h - new_h) // 2
-                    canvas[y_offset:y_offset + new_h,
-                           x_offset:x_offset + new_w] = resized
+                    x_offset = (win_w - new_w) // 2
+                    canvas[y_offset:y_offset + new_h, x_offset:x_offset + new_w] = resized
                     cv2.imshow(window_name, canvas)
                 else:
                     cv2.imshow(window_name, frame)
@@ -135,7 +126,7 @@ def main():
 
             if key == 27 or key == ord('q'):  # ESC or q
                 print("[receiver] Quit key pressed, exiting")
-                running = False
+                running_flag["running"] = False
                 break
             elif key == ord('w'):
                 send_move(0, -MOVE_STEP)
@@ -145,9 +136,11 @@ def main():
                 send_move(-MOVE_STEP, 0)
             elif key == ord('d'):
                 send_move(MOVE_STEP, 0)
+            elif key == 32:  # SPACE
+                send_move(0, 0, action=1)
 
     finally:
-        running = False
+        running_flag["running"] = False
         try:
             ctrl_sock.close()
         except OSError:
