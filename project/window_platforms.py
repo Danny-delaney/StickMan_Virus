@@ -40,7 +40,7 @@ def get_class_name(hwnd):
 
 def get_window_platforms(min_width=80, min_height=40):
     """
-    Return a list of rectangles (x, y, w, h) for top-level windows.
+    Return a list of tuples (x, y, w, h, hwnd) for top-level windows.
 
     Each rectangle is clipped to the main screen.
     We skip hidden, minimized, tiny, desktop/taskbar, our overlay,
@@ -100,7 +100,7 @@ def get_window_platforms(min_width=80, min_height=40):
         if area >= 0.9 * screen_area:
             return True
 
-        platforms.append((clip_left, clip_top, width, height))
+        platforms.append((clip_left, clip_top, width, height, hwnd))
         return True
 
     enum_cb = WNDENUMPROC(callback)

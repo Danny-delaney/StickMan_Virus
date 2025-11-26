@@ -1,18 +1,23 @@
 import socket
 import struct
 import threading
+import time
 
 import cv2
 import numpy as np
+
+# Requires: pip install pynput
+from pynput import keyboard
 
 SENDER_IP = "149.153.106.23"
 PORT = 5000          # video stream port
 CONTROL_PORT = 5001  # control port
 
-MOVE_STEP = 20       # pixels per key press
-
 INITIAL_WIDTH = 960
 INITIAL_HEIGHT = 540
+
+CONTROL_HZ = 60
+SPEED_PX_PER_SEC = 900
 
 
 def recvall(sock, n: int):
@@ -31,27 +36,93 @@ def recvall(sock, n: int):
 
 def video_receiver(sock, frame_lock, frame_holder, running_flag):
     """
-    Receive JPEG frames from the sender.
-    Protocol:
-      - read 4 bytes: frame length, big endian
-      - read frame bytes
+    Receive stream with:
+      - 'F' + uint32 len + JPEG(full frame)
+      - 'P' + uint16 count + repeated( uint16 x,y,w,h + uint32 len + JPEG(patch) )
     """
+    base = None
+
     while running_flag["running"]:
-        header = recvall(sock, 4)
-        if not header:
+        msg_type = recvall(sock, 1)
+        if not msg_type:
             break
 
-        (size,) = struct.unpack("!I", header)
-        payload = recvall(sock, size)
-        if not payload:
+        t = msg_type  # bytes length 1
+        if t == b"F":
+            header = recvall(sock, 4)
+            if not header:
+                break
+            (size,) = struct.unpack("!I", header)
+            payload = recvall(sock, size)
+            if not payload:
+                break
+            frame = cv2.imdecode(np.frombuffer(payload, dtype=np.uint8), cv2.IMREAD_COLOR)
+            if frame is None:
+                continue
+            with frame_lock:
+                base = frame
+                frame_holder["frame"] = base
+
+        elif t == b"P":
+            header = recvall(sock, 2)
+            if not header:
+                break
+            (count,) = struct.unpack("!H", header)
+
+            # no base frame yet -> read and discard patches
+            if base is None:
+                for _ in range(count):
+                    h2 = recvall(sock, 12)
+                    if not h2:
+                        running_flag["running"] = False
+                        break
+                    x, y, w, h, size = struct.unpack("!HHHHI", h2)
+                    payload = recvall(sock, size)
+                    if not payload:
+                        running_flag["running"] = False
+                        break
+                continue
+
+            # apply patches
+            with frame_lock:
+                for _ in range(count):
+                    h2 = recvall(sock, 12)
+                    if not h2:
+                        running_flag["running"] = False
+                        break
+                    x, y, w, h, size = struct.unpack("!HHHHI", h2)
+                    payload = recvall(sock, size)
+                    if not payload:
+                        running_flag["running"] = False
+                        break
+                    patch = cv2.imdecode(np.frombuffer(payload, dtype=np.uint8), cv2.IMREAD_COLOR)
+                    if patch is None:
+                        continue
+
+                    # Safety clamp
+                    H, W = base.shape[:2]
+                    x2 = min(W, x + w)
+                    y2 = min(H, y + h)
+                    x = max(0, x)
+                    y = max(0, y)
+                    if x >= x2 or y >= y2:
+                        continue
+
+                    # Ensure patch matches target region size (JPEG decode should match, but be robust)
+                    target_w = x2 - x
+                    target_h = y2 - y
+                    if patch.shape[1] != target_w or patch.shape[0] != target_h:
+                        patch = cv2.resize(patch, (target_w, target_h))
+
+                    base[y:y2, x:x2] = patch
+
+                frame_holder["frame"] = base
+
+        else:
+            # unknown message type -> stop
             break
 
-        frame = cv2.imdecode(np.frombuffer(payload, dtype=np.uint8), cv2.IMREAD_COLOR)
-        if frame is None:
-            continue
-
-        with frame_lock:
-            frame_holder["frame"] = frame
+    running_flag["running"] = False
 
 
 def main():
@@ -64,22 +135,51 @@ def main():
     vid_sock.connect((SENDER_IP, PORT))
     print("[receiver] Connected for video")
 
-    # connect to control channel
     ctrl_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     print(f"[receiver] Connecting to {SENDER_IP}:{CONTROL_PORT} for control...")
     ctrl_sock.connect((SENDER_IP, CONTROL_PORT))
     print("[receiver] Connected for control")
 
     def send_move(dx, dy, action=0):
-        """Send one control packet to the sender."""
         try:
-            # dx, dy, action (0=move/jump, 1=punch/click)
             packet = struct.pack("!iii", int(dx), int(dy), int(action))
             ctrl_sock.sendall(packet)
         except OSError:
             pass
 
-    # start background video thread
+    # --- Keyboard state (pynput) ---
+    pressed = set()
+    click_pending = {"v": False}
+    quit_flag = {"v": False}
+
+    def on_press(key):
+        if not running_flag["running"]:
+            return False
+        try:
+            k = key.char.lower()
+            if k in ("w", "a", "s", "d"):
+                pressed.add(k)
+            elif k == "q":
+                quit_flag["v"] = True
+        except AttributeError:
+            if key == keyboard.Key.space:
+                click_pending["v"] = True
+            elif key == keyboard.Key.esc:
+                quit_flag["v"] = True
+
+    def on_release(key):
+        try:
+            k = key.char.lower()
+            if k in ("w", "a", "s", "d"):
+                pressed.discard(k)
+        except AttributeError:
+            pass
+
+    listener = keyboard.Listener(on_press=on_press, on_release=on_release)
+    listener.daemon = True
+    listener.start()
+
+    # --- Video thread ---
     t = threading.Thread(
         target=video_receiver,
         args=(vid_sock, frame_lock, frame_holder, running_flag),
@@ -91,61 +191,89 @@ def main():
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(window_name, INITIAL_WIDTH, INITIAL_HEIGHT)
 
-    print("[receiver] Controls: WASD to move, SPACE to punch/click, Q/ESC to quit")
+    print("[receiver] Controls: hold WASD to move, SPACE to punch/click, Q/ESC to quit")
+
+    last_send = time.perf_counter()
+    send_period = 1.0 / CONTROL_HZ
 
     try:
         while running_flag["running"]:
+            try:
+                if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
+                    running_flag["running"] = False
+                    break
+            except cv2.error:
+                running_flag["running"] = False
+                break
+
             with frame_lock:
                 frame = None if frame_holder["frame"] is None else frame_holder["frame"].copy()
 
             if frame is not None:
                 fh, fw = frame.shape[:2]
-
-                # scale frame to fit the current window
                 try:
-                    x, y, win_w, win_h = cv2.getWindowImageRect(window_name)
-                except AttributeError:
+                    _, _, win_w, win_h = cv2.getWindowImageRect(window_name)
+                except Exception:
                     win_w, win_h = INITIAL_WIDTH, INITIAL_HEIGHT
 
                 if win_w > 0 and win_h > 0:
                     scale = min(win_w / fw, win_h / fh)
-                    new_w = int(fw * scale)
-                    new_h = int(fh * scale)
+                    new_w = max(1, int(fw * scale))
+                    new_h = max(1, int(fh * scale))
                     resized = cv2.resize(frame, (new_w, new_h))
 
                     canvas = np.zeros((win_h, win_w, 3), dtype=np.uint8)
-                    y_offset = (win_h - new_h) // 2
-                    x_offset = (win_w - new_w) // 2
-                    canvas[y_offset:y_offset + new_h, x_offset:x_offset + new_w] = resized
+                    y_off = (win_h - new_h) // 2
+                    x_off = (win_w - new_w) // 2
+                    canvas[y_off:y_off + new_h, x_off:x_off + new_w] = resized
                     cv2.imshow(window_name, canvas)
                 else:
                     cv2.imshow(window_name, frame)
 
-            # keyboard input
-            key = cv2.waitKey(1) & 0xFF
+            cv2.waitKey(1)
 
-            if key == 27 or key == ord('q'):  # ESC or q
-                print("[receiver] Quit key pressed, exiting")
+            if quit_flag["v"]:
                 running_flag["running"] = False
                 break
-            elif key == ord('w'):
-                send_move(0, -MOVE_STEP)
-            elif key == ord('s'):
-                send_move(0, MOVE_STEP)
-            elif key == ord('a'):
-                send_move(-MOVE_STEP, 0)
-            elif key == ord('d'):
-                send_move(MOVE_STEP, 0)
-            elif key == 32:  # SPACE
-                send_move(0, 0, action=1)
+
+            now = time.perf_counter()
+            if now - last_send >= send_period:
+                dt = now - last_send
+                if dt > 0.1:
+                    dt = 0.1
+
+                dx_dir = (1 if "d" in pressed else 0) - (1 if "a" in pressed else 0)
+                dy_dir = (1 if "s" in pressed else 0) - (1 if "w" in pressed else 0)
+
+                dx = dx_dir * SPEED_PX_PER_SEC * dt
+                dy = dy_dir * SPEED_PX_PER_SEC * dt
+
+                action = 1 if click_pending["v"] else 0
+                click_pending["v"] = False
+
+                if dx_dir != 0 or dy_dir != 0 or action != 0:
+                    send_move(dx, dy, action)
+
+                last_send = now
 
     finally:
         running_flag["running"] = False
         try:
+            listener.stop()
+        except Exception:
+            pass
+        try:
             ctrl_sock.close()
         except OSError:
             pass
-        cv2.destroyAllWindows()
+        try:
+            vid_sock.close()
+        except OSError:
+            pass
+        try:
+            cv2.destroyAllWindows()
+        except Exception:
+            pass
         print("[receiver] Main loop exiting")
 
 

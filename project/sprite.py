@@ -5,8 +5,8 @@ from typing import Dict, List, Tuple
 
 from PyQt5 import QtCore, QtGui
 
-SPRITE_WIDTH = 64
-SPRITE_HEIGHT = 64
+SPRITE_WIDTH = 320
+SPRITE_HEIGHT = 320
 
 
 def _asset_path(name: str) -> str:
@@ -40,6 +40,24 @@ def _slice_grid(
     i = 0
     for r in range(rows):
         for c in range(cols):
+            if i >= count:
+                return frames
+            frames.append(sheet.copy(c * frame_w, r * frame_h, frame_w, frame_h))
+            i += 1
+    return frames
+
+
+def _slice_custom_grid(sheet: QtGui.QPixmap, frame_w: int, frame_h: int, grid_w: int, grid_h: int, count: int) -> List[QtGui.QPixmap]:
+    """
+    Slices a grid of frames from a sprite sheet.
+    grid_w: number of columns
+    grid_h: number of rows
+    count: total frames to extract
+    """
+    frames = []
+    i = 0
+    for r in range(grid_h):
+        for c in range(grid_w):
             if i >= count:
                 return frames
             frames.append(sheet.copy(c * frame_w, r * frame_h, frame_w, frame_h))
@@ -166,7 +184,8 @@ class StickmanSprite:
         jump = _slice_grid(load("Jump.png"), 64, 64, cols=2, rows=2, count=4)
         jump_up = _slice_row(load("JumpUp.png"), 64, 64, count=1)
         jump_down = _slice_row(load("JumpDown.png"), 64, 64, count=1)
-        punch = _slice_grid(load("Punch.png"), 64, 64, cols=4, rows=3, count=12)
+        # Punch: 3 rows x 4 columns, 10 frames
+        punch = _slice_custom_grid(load("Punch.png"), 64, 64, 4, 3, 10)
 
         def prep(frames: List[QtGui.QPixmap]) -> List[QtGui.QPixmap]:
             scaled = _scaled(frames, self.w, self.h)
