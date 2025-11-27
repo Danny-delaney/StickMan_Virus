@@ -6,12 +6,11 @@ import time
 import cv2
 import numpy as np
 
-# Requires: pip install pynput
 from pynput import keyboard
 
-SENDER_IP = "149.153.106.23"
-PORT = 5000          # video stream port
-CONTROL_PORT = 5001  # control port
+SENDER_IP = "127.0.0.1"
+PORT = 5000
+CONTROL_PORT = 5001
 
 INITIAL_WIDTH = 960
 INITIAL_HEIGHT = 540
@@ -21,7 +20,6 @@ SPEED_PX_PER_SEC = 900
 
 
 def recvall(sock, n: int):
-    """Receive exactly n bytes or return None."""
     data = bytearray()
     while len(data) < n:
         try:
@@ -35,11 +33,6 @@ def recvall(sock, n: int):
 
 
 def video_receiver(sock, frame_lock, frame_holder, running_flag):
-    """
-    Receive stream with:
-      - 'F' + uint32 len + JPEG(full frame)
-      - 'P' + uint16 count + repeated( uint16 x,y,w,h + uint32 len + JPEG(patch) )
-    """
     base = None
 
     while running_flag["running"]:
@@ -47,7 +40,7 @@ def video_receiver(sock, frame_lock, frame_holder, running_flag):
         if not msg_type:
             break
 
-        t = msg_type  # bytes length 1
+        t = msg_type
         if t == b"F":
             header = recvall(sock, 4)
             if not header:
@@ -69,7 +62,6 @@ def video_receiver(sock, frame_lock, frame_holder, running_flag):
                 break
             (count,) = struct.unpack("!H", header)
 
-            # no base frame yet -> read and discard patches
             if base is None:
                 for _ in range(count):
                     h2 = recvall(sock, 12)
@@ -83,7 +75,6 @@ def video_receiver(sock, frame_lock, frame_holder, running_flag):
                         break
                 continue
 
-            # apply patches
             with frame_lock:
                 for _ in range(count):
                     h2 = recvall(sock, 12)
@@ -99,7 +90,6 @@ def video_receiver(sock, frame_lock, frame_holder, running_flag):
                     if patch is None:
                         continue
 
-                    # Safety clamp
                     H, W = base.shape[:2]
                     x2 = min(W, x + w)
                     y2 = min(H, y + h)
@@ -108,7 +98,6 @@ def video_receiver(sock, frame_lock, frame_holder, running_flag):
                     if x >= x2 or y >= y2:
                         continue
 
-                    # Ensure patch matches target region size (JPEG decode should match, but be robust)
                     target_w = x2 - x
                     target_h = y2 - y
                     if patch.shape[1] != target_w or patch.shape[0] != target_h:
@@ -119,7 +108,6 @@ def video_receiver(sock, frame_lock, frame_holder, running_flag):
                 frame_holder["frame"] = base
 
         else:
-            # unknown message type -> stop
             break
 
     running_flag["running"] = False
@@ -147,7 +135,6 @@ def main():
         except OSError:
             pass
 
-    # --- Keyboard state (pynput) ---
     pressed = set()
     click_pending = {"v": False}
     quit_flag = {"v": False}
@@ -179,7 +166,6 @@ def main():
     listener.daemon = True
     listener.start()
 
-    # --- Video thread ---
     t = threading.Thread(
         target=video_receiver,
         args=(vid_sock, frame_lock, frame_holder, running_flag),

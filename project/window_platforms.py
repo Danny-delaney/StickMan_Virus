@@ -1,8 +1,3 @@
-"""
-Find top-level windows on Windows and return their on-screen rectangles.
-These rectangles are used as platforms for the square.
-"""
-
 import sys
 import ctypes
 
@@ -22,7 +17,6 @@ class RECT(ctypes.Structure):
 
 
 def get_window_text(hwnd):
-    """Get the window title."""
     length = user32.GetWindowTextLengthW(hwnd)
     if length == 0:
         return ""
@@ -32,20 +26,12 @@ def get_window_text(hwnd):
 
 
 def get_class_name(hwnd):
-    """Get the window class name."""
     buf = ctypes.create_unicode_buffer(256)
     user32.GetClassNameW(hwnd, buf, 256)
     return buf.value
 
 
 def get_window_platforms(min_width=80, min_height=40):
-    """
-    Return a list of tuples (x, y, w, h, hwnd) for top-level windows.
-
-    Each rectangle is clipped to the main screen.
-    We skip hidden, minimized, tiny, desktop/taskbar, our overlay,
-    and almost full-screen windows.
-    """
     platforms = []
 
     WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
@@ -67,7 +53,6 @@ def get_window_platforms(min_width=80, min_height=40):
         class_name = get_class_name(hwnd)
         title = get_window_text(hwnd)
 
-        # ignore desktop, helper windows, taskbar, and our overlay
         if class_name in ("Progman", "WorkerW", "Shell_TrayWnd"):
             return True
         if title == "PythonOverlay":
@@ -79,7 +64,6 @@ def get_window_platforms(min_width=80, min_height=40):
 
         left, top, right, bottom = rect.left, rect.top, rect.right, rect.bottom
 
-        # keep only the part inside the main screen
         clip_left = max(0, min(left, desktop_w))
         clip_top = max(0, min(top, desktop_h))
         clip_right = max(0, min(right, desktop_w))
@@ -95,7 +79,6 @@ def get_window_platforms(min_width=80, min_height=40):
         if clip_left >= desktop_w or clip_top >= desktop_h:
             return True
 
-        # skip windows that cover almost the whole screen
         area = width * height
         if area >= 0.9 * screen_area:
             return True

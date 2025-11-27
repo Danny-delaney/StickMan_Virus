@@ -5,8 +5,8 @@ from typing import Dict, List, Tuple
 
 from PyQt5 import QtCore, QtGui
 
-SPRITE_WIDTH = 320
-SPRITE_HEIGHT = 320
+SPRITE_WIDTH = 64 * 5
+SPRITE_HEIGHT = 64 * 5
 
 
 def _asset_path(name: str) -> str:
@@ -48,12 +48,6 @@ def _slice_grid(
 
 
 def _slice_custom_grid(sheet: QtGui.QPixmap, frame_w: int, frame_h: int, grid_w: int, grid_h: int, count: int) -> List[QtGui.QPixmap]:
-    """
-    Slices a grid of frames from a sprite sheet.
-    grid_w: number of columns
-    grid_h: number of rows
-    count: total frames to extract
-    """
     frames = []
     i = 0
     for r in range(grid_h):
@@ -77,10 +71,6 @@ def _flip_h(p: QtGui.QPixmap) -> QtGui.QPixmap:
 
 
 def _add_outline(p: QtGui.QPixmap, outline_px: int = 2) -> QtGui.QPixmap:
-    """
-    Add a simple white outline around a pixmap by stamping a mask around it.
-    Minimal + readable, not fancy.
-    """
     if outline_px <= 0:
         return p
 
@@ -90,12 +80,10 @@ def _add_outline(p: QtGui.QPixmap, outline_px: int = 2) -> QtGui.QPixmap:
     base = QtGui.QPixmap(w, h)
     base.fill(QtCore.Qt.transparent)
 
-    # build a mask from alpha
     mask = img.createAlphaMask()
     white = QtGui.QPixmap.fromImage(mask)
     white_img = white.toImage().convertToFormat(QtGui.QImage.Format_ARGB32_Premultiplied)
 
-    # tint to white
     for y in range(white_img.height()):
         for x in range(white_img.width()):
             a = QtGui.qAlpha(white_img.pixel(x, y))
@@ -135,24 +123,11 @@ class AnimState(Enum):
 
 
 class StickmanSprite:
-    """
-    Stickman sprite renderer with a small finite state machine (FSM).
-
-    Sheets expected in ./assets:
-      - Thin.png     (idle row, 6 frames)
-      - Run.png      (run row, 9 frames)
-      - Jump.png     (grid, 2x2, 4 frames)
-      - JumpUp.png   (row, 1 frame)
-      - JumpDown.png (row, 1 frame)
-      - Punch.png    (grid, 4x3, 12 frames)  <-- added
-    """
-
-    def __init__(self, *, width: int = SPRITE_WIDTH, height: int = SPRITE_HEIGHT, outline_px: int = 2):
+    def __init__(self, *, width: int = SPRITE_WIDTH, height: int = SPRITE_HEIGHT, outline_px: int = 0):
         self.w = int(width)
         self.h = int(height)
         self.outline_px = int(outline_px)
 
-        # simple FPS per state
         self._fps: Dict[AnimState, float] = {
             AnimState.IDLE: 10.0,
             AnimState.RUN: 16.0,
@@ -184,7 +159,6 @@ class StickmanSprite:
         jump = _slice_grid(load("Jump.png"), 64, 64, cols=2, rows=2, count=4)
         jump_up = _slice_row(load("JumpUp.png"), 64, 64, count=1)
         jump_down = _slice_row(load("JumpDown.png"), 64, 64, count=1)
-        # Punch: 3 rows x 4 columns, 10 frames
         punch = _slice_custom_grid(load("Punch.png"), 64, 64, 4, 3, 10)
 
         def prep(frames: List[QtGui.QPixmap]) -> List[QtGui.QPixmap]:
@@ -238,7 +212,6 @@ class StickmanSprite:
         while self._accum_ms >= frame_ms:
             self._accum_ms -= frame_ms
             if self._state == AnimState.PUNCH:
-                # play once (stop on last frame)
                 self._frame_idx = min(self._frame_idx + 1, len(frames) - 1)
             else:
                 self._frame_idx = (self._frame_idx + 1) % len(frames)
