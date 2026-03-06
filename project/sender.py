@@ -6,7 +6,7 @@ import sys
 import ctypes
 
 import cv2
-import mss
+import dxcam
 import numpy as np
 
 from PyQt5 import QtWidgets, QtCore, QtGui
@@ -242,104 +242,111 @@ def screen_sender():
         print(f"[sender] Video connection from {addr}")
 
         with conn:
-            with mss.mss() as sct:
-                monitor = sct.monitors[1]
-                prev = None
-                last_keyframe = 0.0
-                period = 1.0 / FPS
-                next_t = time.perf_counter()
-                prev_entered_window = None
+            camera = dxcam.create(output_idx=0)
+            camera.start(target_fps=FPS)
 
-                while True:
-                    now = time.perf_counter()
-                    if now < next_t:
-                        time.sleep(next_t - now)
-                    next_t += period
+            prev = None
+            last_keyframe = 0.0
+            period = 1.0 / FPS
+            next_t = time.perf_counter()
+            prev_entered_window = None
 
-                    entered_hwnd = square_state.get("entered_window")
+            while True:
+                now = time.perf_counter()
+                if now < next_t:
+                    time.sleep(next_t - now)
+                next_t += period
 
-                    if entered_hwnd is not None:
-                        window_frame = capture_window(entered_hwnd)
-                        if window_frame is None:
-                            square_state["entered_window"] = None
-                            square_state["window_enter_time_ms"] = 0
-                            continue
+                entered_hwnd = square_state.get("entered_window")
 
-                        user32 = ctypes.windll.user32
-                        rect = RECT()
-                        frame = window_frame.copy()
-                        if user32.GetWindowRect(entered_hwnd, ctypes.byref(rect)):
-                            win_x = rect.left
-                            win_y = rect.top
+                if entered_hwnd is not None:
+                    window_frame = capture_window(entered_hwnd)
+                    if window_frame is None:
+                        square_state["entered_window"] = None
+                        square_state["window_enter_time_ms"] = 0
+                        continue
 
-                            sprite_x_in_window = int(square_state["x"] - win_x)
-                            sprite_y_in_window = int(square_state["y"] - win_y)
+                    user32 = ctypes.windll.user32
+                    rect = RECT()
+                    frame = window_frame.copy()
+                    if user32.GetWindowRect(entered_hwnd, ctypes.byref(rect)):
+                        win_x = rect.left
+                        win_y = rect.top
 
-                            sprite_rgba = latest_sprite_rgba
-                            if sprite_rgba is not None:
-                                sh, sw = sprite_rgba.shape[:2]
-                                H, W = frame.shape[:2]
+                        sprite_x_in_window = int(square_state["x"] - win_x)
+                        sprite_y_in_window = int(square_state["y"] - win_y)
 
-                                sx = sprite_x_in_window
-                                sy = sprite_y_in_window
+                        sprite_rgba = latest_sprite_rgba
+                        if sprite_rgba is not None:
+                            sh, sw = sprite_rgba.shape[:2]
+                            H, W = frame.shape[:2]
 
-                                x1 = max(0, sx)
-                                y1 = max(0, sy)
-                                x2 = min(W, sx + sw)
-                                y2 = min(H, sy + sh)
+                            sx = sprite_x_in_window
+                            sy = sprite_y_in_window
 
-                                if x2 > x1 and y2 > y1:
-                                    sub_sprite = sprite_rgba[y1 - sy:y2 - sy, x1 - sx:x2 - sx]
-                                    sub_frame = frame[y1:y2, x1:x2]
+                            x1 = max(0, sx)
+                            y1 = max(0, sy)
+                            x2 = min(W, sx + sw)
+                            y2 = min(H, sy + sh)
 
-                                    alpha = sub_sprite[:, :, 3:4].astype(np.float32) / 255.0
-                                    rgb = sub_sprite[:, :, :3].astype(np.float32)
-                                    base = sub_frame.astype(np.float32)
+                            if x2 > x1 and y2 > y1:
+                                sub_sprite = sprite_rgba[y1 - sy:y2 - sy, x1 - sx:x2 - sx]
+                                sub_frame = frame[y1:y2, x1:x2]
 
-                                    blended = alpha * rgb + (1.0 - alpha) * base
-                                    frame[y1:y2, x1:x2] = blended.astype(np.uint8)
-                        else:
-                            frame = window_frame
+                                alpha = sub_sprite[:, :, 3:4].astype(np.float32) / 255.0
+                                rgb = sub_sprite[:, :, :3].astype(np.float32)
+                                base = sub_frame.astype(np.float32)
 
-                        if entered_hwnd != prev_entered_window:
-                            prev = None
-                            prev_entered_window = entered_hwnd
+                                blended = alpha * rgb + (1.0 - alpha) * base
+                                frame[y1:y2, x1:x2] = blended.astype(np.uint8)
                     else:
-                        img = np.array(sct.grab(monitor))
-                        frame = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+                        frame = window_frame
 
-                        if prev_entered_window is not None:
-                            prev = None
-                            prev_entered_window = None
+                    if entered_hwnd != prev_entered_window:
+                        prev = None
+                        prev_entered_window = entered_hwnd
+                else:
+                    frame = camera.get_latest_frame()
+                    if frame is None:
+                        continue
 
-                    try:
-                        t = time.time()
-                        if prev is None or (t - last_keyframe) >= KEYFRAME_EVERY_SEC:
-                            if not _send_full(conn, frame):
-                                continue
-                            prev = frame
-                            last_keyframe = t
+                    # dxcam usually returns RGB; OpenCV expects BGR
+                    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+
+                    if prev_entered_window is not None:
+                        prev = None
+                        prev_entered_window = None
+
+                try:
+                    t = time.time()
+                    if prev is None or (t - last_keyframe) >= KEYFRAME_EVERY_SEC:
+                        if not _send_full(conn, frame):
                             continue
-
-                        rects = _find_change_rects(prev, frame)
-                        if not rects:
-                            prev = frame
-                            continue
-
-                        total_area = frame.shape[0] * frame.shape[1]
-                        changed_area = sum(w * h for (_, _, w, h) in rects)
-
-                        if (changed_area / float(total_area)) > MAX_CHANGED_FRACTION:
-                            _send_full(conn, frame)
-                            last_keyframe = t
-                        else:
-                            _send_patches(conn, frame, rects)
-
                         prev = frame
+                        last_keyframe = t
+                        continue
 
-                    except (BrokenPipeError, ConnectionResetError, OSError):
-                        print("[sender] Video connection closed")
-                        break
+                    rects = _find_change_rects(prev, frame)
+                    if not rects:
+                        prev = frame
+                        continue
+
+                    total_area = frame.shape[0] * frame.shape[1]
+                    changed_area = sum(w * h for (_, _, w, h) in rects)
+
+                    if (changed_area / float(total_area)) > MAX_CHANGED_FRACTION:
+                        _send_full(conn, frame)
+                        last_keyframe = t
+                    else:
+                        _send_patches(conn, frame, rects)
+
+                    prev = frame
+
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    print("[sender] Video connection closed")
+                    break
+
+            camera.stop()
 
 
 def control_server():
