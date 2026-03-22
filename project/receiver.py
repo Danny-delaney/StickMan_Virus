@@ -2,6 +2,7 @@ import socket
 import struct
 import threading
 import time
+import argparse
 
 import cv2
 import numpy as np
@@ -74,6 +75,7 @@ def video_receiver(sock, frame_lock, frame_holder, running_flag):
                         running_flag["running"] = False
                         break
                 continue
+                
 
             with frame_lock:
                 for _ in range(count):
@@ -114,18 +116,24 @@ def video_receiver(sock, frame_lock, frame_holder, running_flag):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--ip", default=SENDER_IP)
+    args = parser.parse_args()
+
+    sender_ip = args.ip
+
     running_flag = {"running": True}
     frame_lock = threading.Lock()
     frame_holder = {"frame": None}
 
     vid_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    print(f"[receiver] Connecting to {SENDER_IP}:{PORT} for video...")
-    vid_sock.connect((SENDER_IP, PORT))
+    print(f"[receiver] Connecting to {sender_ip}:{PORT} for video...")
+    vid_sock.connect((sender_ip, PORT))
     print("[receiver] Connected for video")
 
     ctrl_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    print(f"[receiver] Connecting to {SENDER_IP}:{CONTROL_PORT} for control...")
-    ctrl_sock.connect((SENDER_IP, CONTROL_PORT))
+    print(f"[receiver] Connecting to {sender_ip}:{CONTROL_PORT} for control...")
+    ctrl_sock.connect((sender_ip, CONTROL_PORT))
     print("[receiver] Connected for control")
 
     def send_move(dx, dy, action=0):

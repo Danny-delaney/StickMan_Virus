@@ -310,7 +310,6 @@ def screen_sender():
                     if frame is None:
                         continue
 
-                    # dxcam usually returns RGB; OpenCV expects BGR
                     frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
                     if prev_entered_window is not None:
@@ -719,34 +718,72 @@ def start_overlay():
 def left_click():
     if sys.platform != "win32":
         return
-    
+
     hwnd = square_state.get("entered_window")
-    if hwnd is None:
-        return
-    
     user32 = ctypes.windll.user32
-    rect = RECT()
-    if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
-        return
-    
+
     sx = int(square_state.get("x", 0))
     sy = int(square_state.get("y", 0))
     facing = 1 if square_state.get("facing", 1) >= 0 else -1
-    
+    desktop_w = int(user32.GetSystemMetrics(0))
+    desktop_h = int(user32.GetSystemMetrics(1))
+
     if facing > 0:
-        punch_x = sx + SPRITE_WIDTH
+        click_x = sx + SPRITE_WIDTH
     else:
-        punch_x = sx
-    punch_y = sy + SPRITE_HEIGHT // 3
-    
-    client_x = punch_x - rect.left
-    client_y = punch_y - rect.top
-    
+        click_x = sx
+
+    click_y = sy + SPRITE_HEIGHT // 3
+    click_x = max(0, min(desktop_w - 1, int(click_x)))
+    click_y = max(0, min(desktop_h - 1, int(click_y)))
+
+    class POINT(ctypes.Structure):
+        _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+    if hwnd is None:
+        pt = POINT()
+        user32.GetCursorPos(ctypes.byref(pt))
+        orig_x, orig_y = pt.x, pt.y
+        user32.SetCursorPos(click_x, click_y)
+        MOUSEEVENTF_LEFTDOWN = 0x0002
+        MOUSEEVENTF_LEFTUP = 0x0004
+        user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+        user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+        user32.SetCursorPos(orig_x, orig_y)
+        return
+
+    title_buf = ctypes.create_unicode_buffer(512)
+    user32.GetWindowTextW(hwnd, title_buf, 512)
+    window_title = title_buf.value or ""
+
+    rect = RECT()
+    if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+        return
+
+    if "notepad" in window_title.lower():
+        pt = POINT()
+        user32.GetCursorPos(ctypes.byref(pt))
+        orig_x, orig_y = pt.x, pt.y
+        user32.SetForegroundWindow(hwnd)
+        user32.SetCursorPos(click_x, click_y)
+
+        MOUSEEVENTF_LEFTDOWN = 0x0002
+        MOUSEEVENTF_LEFTUP = 0x0004
+        user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+        user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+
+        user32.keybd_event(0x41, 0, 0, 0)
+        user32.keybd_event(0x41, 0, 0x0002, 0)
+        user32.SetCursorPos(orig_x, orig_y)
+        return
+
+    client_x = click_x - rect.left
+    client_y = click_y - rect.top
     lParam = (client_y << 16) | (client_x & 0xFFFF)
-    
+
     WM_LBUTTONDOWN = 0x0201
     WM_LBUTTONUP = 0x0202
-    
+
     user32.SendMessageW(hwnd, WM_LBUTTONDOWN, 0, lParam)
     user32.SendMessageW(hwnd, WM_LBUTTONUP, 0, lParam)
 
