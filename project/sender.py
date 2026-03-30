@@ -36,6 +36,21 @@ HITBOX_HALF_WIDTH = int(SPRITE_WIDTH * _HEAD_SRC_WIDTH / (2 * _FRAME_SRC_WIDTH))
 
 WINDOW_EXIT_COOLDOWN_MS = 500
 
+GWL_EXSTYLE = -20
+WS_EX_TOPMOST = 0x00000008
+
+GW_HWNDPREV = 3
+
+HWND_TOP = 0
+HWND_TOPMOST = -1
+HWND_NOTOPMOST = -2
+
+SWP_NOSIZE = 0x0001
+SWP_NOMOVE = 0x0002
+SWP_NOACTIVATE = 0x0010
+SWP_SHOWWINDOW = 0x0040
+SWP_NOOWNERZORDER = 0x0200
+
 latest_sprite_rgba = None
 
 square_state = {
@@ -400,7 +415,6 @@ class Overlay(QtWidgets.QWidget):
         self.setWindowTitle("PythonOverlay")
         self.setWindowFlags(
             QtCore.Qt.FramelessWindowHint
-            | QtCore.Qt.WindowStaysOnTopHint
             | QtCore.Qt.Tool
         )
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
@@ -484,7 +498,7 @@ class Overlay(QtWidgets.QWidget):
                 square_state["y"] = bounds_y
                 square_state["vy"] = max(0, square_state["vy"])
 
-            self.bring_window_to_front(square_state["entered_window"])
+            self.place_overlay_directly_above(square_state["entered_window"])
 
             if square_state.get("down_pressed") and square_state.get("on_ground"):
                 now_ms = int(time.time() * 1000)
@@ -497,6 +511,8 @@ class Overlay(QtWidgets.QWidget):
 
         else:
             square_state["x"] = max(0, min(self.screen_w - SPRITE_WIDTH, square_state["x"]))
+            
+            self.restore_overlay_free_mode()
 
             if not entering_window:
                 self.handle_vertical_collisions(prev_y)
@@ -556,10 +572,48 @@ class Overlay(QtWidgets.QWidget):
 
         return (x, y, w, h)
 
-    def bring_window_to_front(self, hwnd):
-        if sys.platform == "win32":
-            user32 = ctypes.windll.user32
-            user32.SetForegroundWindow(hwnd)
+    def place_overlay_directly_above(self, hwnd):
+        if sys.platform != "win32":
+            return
+
+        overlay_hwnd = int(self.winId())
+        user32 = ctypes.windll.user32
+
+        target_exstyle = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+        target_is_topmost = bool(target_exstyle & WS_EX_TOPMOST)
+
+        user32.SetWindowPos(
+            overlay_hwnd,
+            HWND_TOPMOST if target_is_topmost else HWND_NOTOPMOST,
+            0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW,
+    )
+
+        prev_hwnd = user32.GetWindow(hwnd, GW_HWNDPREV)
+
+        insert_after = prev_hwnd if prev_hwnd else (HWND_TOPMOST if target_is_topmost else HWND_TOP)
+
+        if prev_hwnd == overlay_hwnd:
+            return
+
+        user32.SetWindowPos(
+            overlay_hwnd,
+            insert_after,
+            0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW,
+        )
+    def restore_overlay_free_mode(self):
+        if sys.platform != "win32":
+            return
+
+        overlay_hwnd = int(self.winId())
+        user32 = ctypes.windll.user32
+        user32.SetWindowPos(
+            overlay_hwnd,
+            HWND_TOPMOST,
+            0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW,
+        )
 
     def handle_vertical_collisions(self, prev_y):
         sx = square_state["x"]
