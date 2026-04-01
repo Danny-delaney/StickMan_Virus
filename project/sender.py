@@ -333,6 +333,10 @@ def screen_sender():
 
                 try:
                     t = time.time()
+
+                    if prev is not None and prev.shape != frame.shape:
+                        prev = None
+
                     if prev is None or (t - last_keyframe) >= KEYFRAME_EVERY_SEC:
                         if not _send_full(conn, frame):
                             continue
@@ -477,41 +481,48 @@ class Overlay(QtWidgets.QWidget):
 
         if square_state.get("entered_window") is not None:
             bounds = self.get_window_bounds(square_state["entered_window"])
-            if bounds is None:
+            if (
+                bounds is None
+                or bounds[2] < SPRITE_WIDTH
+                or bounds[3] < SPRITE_FOOT_Y
+            ):
                 square_state["entered_window"] = None
                 square_state["window_offset_x"] = 0
                 square_state["window_offset_y"] = 0
                 square_state["window_enter_time_ms"] = 0
-                bounds = (0, 0, self.screen_w, self.screen_h)
+                square_state["on_ground"] = False
+            else:
+                bounds_x, bounds_y, bounds_w, bounds_h = bounds
 
-            bounds_x, bounds_y, bounds_w, bounds_h = bounds
+                square_state["x"] = max(
+                    bounds_x,
+                    min(bounds_x + bounds_w - SPRITE_WIDTH, square_state["x"])
+                )
 
-            square_state["x"] = max(bounds_x, min(bounds_x + bounds_w - SPRITE_WIDTH, square_state["x"]))
+                window_floor = bounds_y + bounds_h - SPRITE_FOOT_Y
+                if square_state["y"] >= window_floor and square_state["vy"] >= 0:
+                    square_state["y"] = window_floor
+                    square_state["vy"] = 0
+                    square_state["on_ground"] = True
 
-            window_floor = bounds_y + bounds_h - SPRITE_FOOT_Y
-            if square_state["y"] >= window_floor and square_state["vy"] >= 0:
-                square_state["y"] = window_floor
-                square_state["vy"] = 0
-                square_state["on_ground"] = True
+                if square_state["y"] <= bounds_y:
+                    square_state["y"] = bounds_y
+                    square_state["vy"] = max(0, square_state["vy"])
 
-            if square_state["y"] <= bounds_y:
-                square_state["y"] = bounds_y
-                square_state["vy"] = max(0, square_state["vy"])
+                self.place_overlay_directly_above(square_state["entered_window"])
 
-            self.place_overlay_directly_above(square_state["entered_window"])
+                if square_state.get("down_pressed") and square_state.get("on_ground"):
+                    now_ms = int(time.time() * 1000)
+                    enter_ms = square_state.get("window_enter_time_ms", 0)
+                    if enter_ms == 0 or now_ms - enter_ms >= WINDOW_EXIT_COOLDOWN_MS:
+                        square_state["entered_window"] = None
+                        square_state["window_offset_x"] = 0
+                        square_state["window_offset_y"] = 0
+                        square_state["window_enter_time_ms"] = 0
 
-            if square_state.get("down_pressed") and square_state.get("on_ground"):
-                now_ms = int(time.time() * 1000)
-                enter_ms = square_state.get("window_enter_time_ms", 0)
-                if enter_ms == 0 or now_ms - enter_ms >= WINDOW_EXIT_COOLDOWN_MS:
-                    square_state["entered_window"] = None
-                    square_state["window_offset_x"] = 0
-                    square_state["window_offset_y"] = 0
-                    square_state["window_enter_time_ms"] = 0
-
-        else:
+        if square_state.get("entered_window") is None:
             square_state["x"] = max(0, min(self.screen_w - SPRITE_WIDTH, square_state["x"]))
-            
+
             self.restore_overlay_free_mode()
 
             if not entering_window:
@@ -561,6 +572,14 @@ class Overlay(QtWidgets.QWidget):
             return None
 
         user32 = ctypes.windll.user32
+
+        if not user32.IsWindow(hwnd):
+            return None
+        if not user32.IsWindowVisible(hwnd):
+            return None
+        if user32.IsIconic(hwnd):
+            return None
+
         rect = RECT()
         if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
             return None
@@ -569,6 +588,9 @@ class Overlay(QtWidgets.QWidget):
         y = rect.top
         w = rect.right - rect.left
         h = rect.bottom - rect.top
+
+        if w <= 0 or h <= 0:
+            return None
 
         return (x, y, w, h)
 

@@ -75,7 +75,6 @@ def video_receiver(sock, frame_lock, frame_holder, running_flag):
                         running_flag["running"] = False
                         break
                 continue
-                
 
             with frame_lock:
                 for _ in range(count):

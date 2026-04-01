@@ -31,7 +31,7 @@ def get_class_name(hwnd):
     return buf.value
 
 
-def get_window_platforms(min_width=80, min_height=40):
+def get_window_platforms(min_width=0, min_height=0):
     platforms = []
 
     WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)

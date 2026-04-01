@@ -88,7 +88,7 @@ def _add_outline(p: QtGui.QPixmap, outline_px: int = 2) -> QtGui.QPixmap:
         for x in range(white_img.width()):
             a = QtGui.qAlpha(white_img.pixel(x, y))
             if a:
-                white_img.setPixel(x, y, QtGui.qRgba(255, 255, 255, 255))
+                white_img.setPixel(x, y, QtGui.qRgba(255, 255, 255, 0))
     white = QtGui.QPixmap.fromImage(white_img)
 
     offsets: List[Tuple[int, int]] = []
