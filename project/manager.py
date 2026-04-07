@@ -18,19 +18,38 @@ def set_window_pos(hwnd, x, y, w, h):
     SWP_NOZORDER = 0x0004
     user32.SetWindowPos(hwnd, 0, x, y, w, h, SWP_NOZORDER)
 
-def minimize_all():
-    user32.keybd_event(0x5B, 0, 0, 0)
-    user32.keybd_event(0x44, 0, 0, 0)
-    user32.keybd_event(0x44, 0, 2, 0)
-    user32.keybd_event(0x5B, 0, 2, 0)
+def minimize_all_except_apps():
+    safe_list = [
+        "ReceiverVideo",
+        "PythonOverlay",
+        "Launcher",
+        "Layout Manager",
+        "TkChild",
+        "Toplevel"
+    ]
+
+    def enum_handler(hwnd, lparam):
+        if user32.IsWindowVisible(hwnd):
+            length = user32.GetWindowTextLengthW(hwnd)
+            buff = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, buff, length + 1)
+            title = buff.value
+
+            class_buff = ctypes.create_unicode_buffer(256)
+            user32.GetClassNameW(hwnd, class_buff, 256)
+            cls = class_buff.value
+
+            is_safe = any(item.lower() in title.lower() or item.lower() in cls.lower() 
+                         for item in safe_list)
+
+            if not is_safe and not user32.IsIconic(hwnd):
+                user32.ShowWindow(hwnd, 6)
+        return True
+
+    EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+    user32.EnumWindows(EnumWindowsProc(enum_handler), 0)
 
 def find_window(criteria):
-    """
-    criteria = {
-        "title": "partial match",
-        "class": "exact class"
-    }
-    """
     for x, y, w, h, hwnd in get_window_platforms():
         title = get_window_text(hwnd)
         cls = get_class_name(hwnd)
@@ -101,7 +120,8 @@ class LayoutApp(tk.Tk):
             return
 
         layout = self.layouts.get(name, [])
-        minimize_all()
+
+        minimize_all_except_apps()
 
         for win in layout:
             criteria = {
