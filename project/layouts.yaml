@@ -1,0 +1,57 @@
+layouts:
+
+  level1:
+    - name: text_file
+      cmd: "notepad.exe test\\test.txt"
+      title: "test.txt"
+      class: "Notepad"
+      x: 0
+      y: 700
+      width: 640
+      height: 380
+
+    - name: calc
+      cmd: "calc.exe"
+      title: "Calculator"
+      x: 1280
+      y: 0
+      width: 640
+      height: 350
+
+
+  level2:
+    - name: image_file
+      cmd: "mspaint.exe test\\test.png"
+      title: "test.png"
+      x: 1280
+      y: 700
+      width: 640
+      height: 380
+
+    - name: notepad
+      cmd: "notepad.exe"
+      title: "Notepad"
+      class: "Notepad"
+      x: 640
+      y: 0
+      width: 640
+      height: 350
+
+
+  level3:
+    - name: text_file
+      cmd: "notepad.exe test\\test.txt"
+      title: "test.txt"
+      class: "Notepad"
+      x: 640
+      y: 700
+      width: 640
+      height: 380
+
+    - name: calc
+      cmd: "calc.exe"
+      title: "Calculator"
+      x: 0
+      y: 0
+      width: 640
+      height: 350
