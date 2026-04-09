@@ -4,6 +4,7 @@ import time
 import threading
 import sys
 import ctypes
+import json
 
 import cv2
 import dxcam
@@ -67,6 +68,8 @@ square_state = {
     "down_pressed": False,
     "down_ttl_ms": 0,
     "window_enter_time_ms": 0,
+    "score": 0,
+    "dots": []
 }
 
 FPS = 18
@@ -78,7 +81,6 @@ DILATE_K = 7
 MIN_RECT_AREA = 2000
 MAX_RECTS = 30
 MAX_CHANGED_FRACTION = 0.25
-
 
 def recvall(sock, n: int):
     data = bytearray()
@@ -170,7 +172,6 @@ def capture_window(hwnd):
     frame = cv2.cvtColor(bmp_array, cv2.COLOR_BGRA2BGR)
     return frame
 
-
 def _merge_rects(rects, gap=8):
     if not rects:
         return []
@@ -196,7 +197,6 @@ def _merge_rects(rects, gap=8):
             merged.append((x, y, w, h))
     return merged
 
-
 def _find_change_rects(prev_bgr, curr_bgr):
     diff = cv2.absdiff(curr_bgr, prev_bgr)
     gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
@@ -221,7 +221,6 @@ def _find_change_rects(prev_bgr, curr_bgr):
 
     return rects
 
-
 def _send_full(conn, frame_bgr):
     ok, encoded = cv2.imencode(".jpg", frame_bgr, [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY])
     if not ok:
@@ -229,7 +228,6 @@ def _send_full(conn, frame_bgr):
     payload = encoded.tobytes()
     conn.sendall(b"F" + struct.pack("!I", len(payload)) + payload)
     return True
-
 
 def _send_patches(conn, frame_bgr, rects):
     conn.sendall(b"P" + struct.pack("!H", len(rects)))
@@ -242,7 +240,6 @@ def _send_patches(conn, frame_bgr, rects):
         header = struct.pack("!HHHHI", x, y, w, h, len(payload))
         conn.sendall(header)
         conn.sendall(payload)
-
 
 def screen_sender():
     global latest_sprite_rgba
@@ -366,7 +363,6 @@ def screen_sender():
 
             camera.stop()
 
-
 def control_server():
     global square_state
 
@@ -411,6 +407,19 @@ def control_server():
             finally:
                 print("[sender] Control server thread exiting")
 
+def dot_server():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind(("127.0.0.1", 5002))
+    while True:
+        data, _ = sock.recvfrom(4096)
+        try:
+            msg = json.loads(data.decode())
+            if msg.get("action") == "set":
+                square_state["dots"] = msg.get("dots", [])
+            elif msg.get("action") == "clear":
+                square_state["dots"] = []
+        except:
+            pass
 
 class Overlay(QtWidgets.QWidget):
     def __init__(self):
@@ -474,6 +483,20 @@ class Overlay(QtWidgets.QWidget):
 
         square_state["on_ground"] = False
         square_state["on_wall"] = False
+        
+        sx = square_state["x"] + SPRITE_WIDTH / 2.0
+        sy = square_state["y"] + SPRITE_HEIGHT / 2.0
+        hit_radius = 30.0
+
+        remaining_dots = []
+        for d in square_state.get("dots", []):
+            dx = d["x"] - sx
+            dy = d["y"] - sy
+            if (dx*dx + dy*dy) < (hit_radius * hit_radius):
+                square_state["score"] = square_state.get("score", 0) + 1
+            else:
+                remaining_dots.append(d)
+        square_state["dots"] = remaining_dots
 
         entering_window = False
         if square_state.get("entered_window") is None and square_state.get("down_pressed", False):
@@ -528,6 +551,7 @@ class Overlay(QtWidgets.QWidget):
             if not entering_window:
                 self.handle_vertical_collisions(prev_y)
                 self.handle_horizontal_collisions(prev_x)
+                self.check_dot_collisions()
 
             if square_state["y"] >= GROUND_Y and square_state["vy"] >= 0:
                 square_state["y"] = GROUND_Y
@@ -609,7 +633,7 @@ class Overlay(QtWidgets.QWidget):
             HWND_TOPMOST if target_is_topmost else HWND_NOTOPMOST,
             0, 0, 0, 0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW,
-    )
+        )
 
         prev_hwnd = user32.GetWindow(hwnd, GW_HWNDPREV)
 
@@ -624,6 +648,7 @@ class Overlay(QtWidgets.QWidget):
             0, 0, 0, 0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW,
         )
+        
     def restore_overlay_free_mode(self):
         if sys.platform != "win32":
             return
@@ -705,6 +730,22 @@ class Overlay(QtWidgets.QWidget):
                     square_state["x"] = new_center - SPRITE_WIDTH / 2.0
                     square_state["on_wall"] = True
                     return
+                
+    def check_dot_collisions(self):
+        sx = square_state["x"] + SPRITE_WIDTH / 2.0
+        sy = square_state["y"] + SPRITE_HEIGHT / 2.0
+        hit_radius = 100.0
+    
+        initial_count = len(square_state.get("dots", []))
+        remaining_dots = [
+            d for d in square_state.get("dots", [])
+            if ((d["x"] - sx)**2 + (d["y"] - sy)**2) >= hit_radius**2
+        ]
+    
+        collected = initial_count - len(remaining_dots)
+        if collected > 0:
+            square_state["score"] = square_state.get("score", 0) + collected
+            square_state["dots"] = remaining_dots
 
     def paintEvent(self, event):
         global latest_sprite_rgba
@@ -721,6 +762,15 @@ class Overlay(QtWidgets.QWidget):
 
         draw_x = int(square_state["x"])
         draw_y = int(square_state["y"])
+        
+        painter.setPen(QtGui.QColor(255, 255, 255))
+        painter.setFont(QtGui.QFont("Arial", 24, QtGui.QFont.Bold))
+        painter.drawText(20, 50, f"Score: {square_state.get('score', 0)}")
+
+        painter.setBrush(QtGui.QColor(255, 255, 0))
+        painter.setPen(QtCore.Qt.NoPen)
+        for d in square_state.get("dots", []):
+            painter.drawEllipse(QtCore.QPoint(int(d["x"]), int(d["y"])), 6, 6)
 
         moving = abs(square_state.get("input_vx", 0.0)) > 0.1
         facing = square_state.get("facing", 1)
@@ -867,4 +917,5 @@ def left_click():
 if __name__ == "__main__":
     threading.Thread(target=screen_sender, daemon=True).start()
     threading.Thread(target=control_server, daemon=True).start()
+    threading.Thread(target=dot_server, daemon=True).start()
     start_overlay()

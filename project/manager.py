@@ -5,6 +5,8 @@ import time
 import os
 import yaml
 import ctypes
+import json
+import socket
 
 from window_platforms import (
     get_window_platforms,
@@ -66,16 +68,22 @@ def find_window(criteria):
 
     return None
 
-
 def is_window_present(criteria):
     return find_window(criteria) is not None
+
+def send_to_sender(msg):
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.sendto(json.dumps(msg).encode(), ("127.0.0.1", 5002))
+    except Exception as e:
+        print(f"[WARN] Failed to send msg to sender: {e}")
 
 class LayoutApp(tk.Tk):
     def __init__(self):
         super().__init__()
 
         self.title("Layout Manager")
-        self.geometry("380x260")
+        self.geometry("380x280")
         self.resizable(False, False)
 
         self.layouts = self.load_layouts()
@@ -94,7 +102,8 @@ class LayoutApp(tk.Tk):
         )
         self.combo.pack(pady=6, padx=20, fill="x")
 
-        ttk.Button(self, text="Apply Layout", command=self.apply_layout).pack(pady=20)
+        ttk.Button(self, text="Apply Layout", command=self.apply_layout).pack(pady=10)
+        ttk.Button(self, text="Clear Dots", command=self.clear_dots).pack(pady=5)
 
     def load_layouts(self):
         path = os.path.join(os.path.dirname(__file__), "layouts.yaml")
@@ -111,6 +120,9 @@ class LayoutApp(tk.Tk):
             return {}
 
         return data.get("layouts", {})
+        
+    def clear_dots(self):
+        send_to_sender({"action": "clear"})
 
     def apply_layout(self):
         name = self.selected.get()
@@ -121,9 +133,14 @@ class LayoutApp(tk.Tk):
 
         layout = self.layouts.get(name, [])
 
+        dots = [{"x": item["x"], "y": item["y"]} for item in layout if item.get("type") == "dot"]
+        send_to_sender({"action": "set", "dots": dots})
+        
+        windows = [item for item in layout if item.get("type") != "dot"]
+
         minimize_all_except_apps()
 
-        for win in layout:
+        for win in windows:
             criteria = {
                 "title": win.get("title"),
                 "class": win.get("class"),
@@ -136,13 +153,20 @@ class LayoutApp(tk.Tk):
 
         time.sleep(2.5)
 
-        for win in layout:
+        SW_RESTORE = 9
+
+        for win in windows:
             hwnd = find_window({
                 "title": win.get("title"),
                 "class": win.get("class"),
             })
 
             if hwnd:
+                if user32.IsIconic(hwnd):
+                    print(f"[INFO] Restoring minimized window: {win.get('name', 'unknown')}")
+                    user32.ShowWindow(hwnd, SW_RESTORE)
+                    time.sleep(0.1) 
+
                 set_window_pos(
                     hwnd,
                     win.get("x", 0),

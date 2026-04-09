@@ -1,57 +1,96 @@
 layouts:
-
   level1:
-    - name: text_file
-      cmd: "notepad.exe test\\test.txt"
-      title: "test.txt"
-      class: "Notepad"
-      x: 0
-      y: 700
-      width: 640
-      height: 380
+    - name: low_step
+      cmd: "explorer.exe terrain\\grass.jpg"
+      title: "grass.jpg"
+      x: 100
+      y: 750
+      width: 400
+      height: 300
 
-    - name: calc
-      cmd: "calc.exe"
-      title: "Calculator"
-      x: 1280
-      y: 0
-      width: 640
-      height: 350
+    - name: mid_step
+      cmd: "explorer.exe terrain\\bricks.jpg"
+      title: "bricks.jpg"
+      x: 650
+      y: 550
+      width: 400
+      height: 300
 
+    - name: high_step
+      cmd: "explorer.exe terrain\\cloud.png"
+      title: "cloud.png"
+      x: 1200
+      y: 350
+      width: 400
+      height: 300
+
+    - {type: dot, x: 400, y: 1400}
+    - {type: dot, x: 800, y: 1400}
+    - {type: dot, x: 1700, y: 1000}
+    - {type: dot, x: 2600, y: 600}
+    - {type: dot, x: 3000, y: 600}
 
   level2:
-    - name: image_file
-      cmd: "mspaint.exe test\\test.png"
-      title: "test.png"
-      x: 1280
-      y: 700
-      width: 640
-      height: 380
+    - name: left_tower
+      cmd: "explorer.exe terrain\\bricks.jpg"
+      title: "bricks.jpg"
+      x: 50
+      y: 500
+      width: 300
+      height: 500
 
-    - name: notepad
-      cmd: "notepad.exe"
-      title: "Notepad"
-      class: "Notepad"
-      x: 640
-      y: 0
-      width: 640
-      height: 350
+    - name: floating_island
+      cmd: "explorer.exe terrain\\cloud.png"
+      title: "cloud.png"
+      x: 600
+      y: 300
+      width: 600
+      height: 150
 
+    - name: right_tower
+      cmd: "explorer.exe terrain\\building.jpg"
+      title: "building.jpg"
+      x: 1450
+      y: 500
+      width: 300
+      height: 500
+
+    - {type: dot, x: 800, y: 900}
+    - {type: dot, x: 900, y: 700}
+    - {type: dot, x: 1500, y: 500}
+    - {type: dot, x: 2100, y: 500}
+    - {type: dot, x: 2600, y: 700}
+    - {type: dot, x: 3200, y: 900}
 
   level3:
-    - name: text_file
-      cmd: "notepad.exe test\\test.txt"
-      title: "test.txt"
-      class: "Notepad"
-      x: 640
-      y: 700
-      width: 640
-      height: 380
+    - name: ground_floor
+      cmd: "explorer.exe terrain\\grass.jpg"
+      title: "grass.jpg"
+      x: 100
+      y: 850
+      width: 1600
+      height: 200
 
-    - name: calc
-      cmd: "calc.exe"
-      title: "Calculator"
-      x: 0
-      y: 0
-      width: 640
-      height: 350
+    - name: block_row
+      cmd: "explorer.exe terrain\\bricks.jpg"
+      title: "bricks.jpg"
+      x: 400
+      y: 550
+      width: 400
+      height: 60
+
+    - name: end_platform
+      cmd: "explorer.exe terrain\\building.jpg"
+      title: "building.jpg"
+      x: 1400
+      y: 600
+      width: 300
+      height: 250
+
+    - {type: dot, x: 1000, y: 1000}
+    - {type: dot, x: 2000, y: 1000}
+    - {type: dot, x: 1400, y: 1000}
+    - {type: dot, x: 2250, y: 1400}
+    - {type: dot, x: 3100, y: 1100}
+    - {type: dot, x: 600, y: 1600}
+    - {type: dot, x: 1800, y: 1600}
