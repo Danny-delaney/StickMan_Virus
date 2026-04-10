@@ -28,6 +28,7 @@ INPUT_HOLD_MS = 80
 PUNCH_MS = 220
 
 SPRITE_FOOT_Y = int(SPRITE_HEIGHT * (60.0 / 64.0))
+SPRITE_FOOT_Y_WINDOW = int(SPRITE_HEIGHT)
 
 GROUND_Y = None
 
@@ -507,7 +508,7 @@ class Overlay(QtWidgets.QWidget):
             if (
                 bounds is None
                 or bounds[2] < SPRITE_WIDTH
-                or bounds[3] < SPRITE_FOOT_Y
+                or bounds[3] < SPRITE_FOOT_Y_WINDOW
             ):
                 square_state["entered_window"] = None
                 square_state["window_offset_x"] = 0
@@ -522,7 +523,7 @@ class Overlay(QtWidgets.QWidget):
                     min(bounds_x + bounds_w - SPRITE_WIDTH, square_state["x"])
                 )
 
-                window_floor = bounds_y + bounds_h - SPRITE_FOOT_Y
+                window_floor = bounds_y + bounds_h - SPRITE_FOOT_Y_WINDOW
                 if square_state["y"] >= window_floor and square_state["vy"] >= 0:
                     square_state["y"] = window_floor
                     square_state["vy"] = 0
