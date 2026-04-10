@@ -768,10 +768,12 @@ class Overlay(QtWidgets.QWidget):
         painter.setFont(QtGui.QFont("Arial", 24, QtGui.QFont.Bold))
         painter.drawText(20, 50, f"Score: {square_state.get('score', 0)}")
 
-        painter.setBrush(QtGui.QColor(255, 255, 0))
         painter.setPen(QtCore.Qt.NoPen)
         for d in square_state.get("dots", []):
-            painter.drawEllipse(QtCore.QPoint(int(d["x"]), int(d["y"])), 6, 6)
+            painter.setBrush(QtGui.QColor(0, 0, 0))
+            painter.drawEllipse(QtCore.QPoint(int(d["x"]), int(d["y"])), 15, 15)
+            painter.setBrush(QtGui.QColor(255, 255, 0))
+            painter.drawEllipse(QtCore.QPoint(int(d["x"]), int(d["y"])), 10, 10)
 
         moving = abs(square_state.get("input_vx", 0.0)) > 0.1
         facing = square_state.get("facing", 1)
